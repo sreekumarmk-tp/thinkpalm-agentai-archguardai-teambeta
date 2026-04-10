@@ -20,7 +20,7 @@ st.title("🏗️ AI Architecture Review Assistant")
 with st.sidebar:
     st.header("Configuration")
     model_choice = st.selectbox("Select Model", [
-	"google/gemma-3-27b-it:free",       # Fallback 1 (Stable)
+	    "google/gemma-3-27b-it:free",       # Fallback 1 (Stable)
     	"openai/gpt-oss-120b:free",        # Fallback 2 (Strong reasoning)
     	"meta-llama/llama-3.3-70b-instruct:free", # Fallback 3 (Reliable)
     	"qwen/qwen3.6-plus:free"
@@ -29,7 +29,7 @@ with st.sidebar:
     st.caption("Backend powered by LangGraph & OpenRouter")
 
 # Main Input
-repo_url = st.text_input("Enter GitHub Repository URL", "https://github.com/tiangolo/fastapi")
+repo_url = st.text_input("Enter GitHub Repository URL", "https://github.com/arjunpkumar/flutter_base")
 
 # --- 3. GITHUB UTILITIES ---
 def fetch_repo_structure(repo_url):
