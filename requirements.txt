@@ -5,3 +5,7 @@ python-dotenv
 requests
 pytest
 pytest-dotenv
+langchain-groq
+python-docx
+fpdf2
+markdown2
