@@ -16,7 +16,9 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 
-from src.config.settings import ACTIVE_AGENT_IDS, MAX_MEMORY_REPORT_CHARS
+from src.config.settings import ACTIVE_AGENT_IDS, MAX_MEMORY_RUNS, MAX_MEMORY_REPORT_CHARS, MEMORY_DB_PATH
+from src.memory.store import SQLiteMemoryStore
+from src.memory.manager import build_memory_context
 from src.agents.specialists.factory import SpecialistFactory
 from src.tools.github import parse_github_repo
 from src.utils.models import (
@@ -24,41 +26,11 @@ from src.utils.models import (
     fetch_available_groq_models,
     get_model_candidates_for_agent,
 )
-
 from src.agents.synthesizer import synthesize_report
 
 load_dotenv()
 
 DEFAULT_MANUAL_MODEL = "openai/gpt-oss-120b:free"
-DEFAULT_MEMORY_PATH = Path(".agent_memory_cli.json")
-MAX_MEMORY_RUNS = 3
-
-def load_memory(path: Path) -> List[Dict[str, str]]:
-    if not path.exists():
-        return []
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(payload, list):
-            return payload[-MAX_MEMORY_RUNS:]
-        return []
-    except Exception:
-        return []
-
-def save_memory(path: Path, memory: List[Dict[str, str]]) -> None:
-    path.write_text(json.dumps(memory[-MAX_MEMORY_RUNS:], indent=2), encoding="utf-8")
-
-def build_memory_context(memory_runs: List[Dict[str, str]]) -> str:
-    if not memory_runs:
-        return "No previous analysis memory available."
-    blocks = []
-    for run in memory_runs[-MAX_MEMORY_RUNS:]:
-        blocks.append(
-            f"- Run ID: {run.get('run_id', 'unknown')}\n"
-            f"  Repository: {run.get('repo_url', 'unknown')}\n"
-            f"  Generated At (UTC): {run.get('generated_at_utc', 'unknown')}\n"
-            f"  Report Excerpt:\n{run.get('report_excerpt', '')}"
-        )
-    return "Previous analysis memory:\n" + "\n".join(blocks)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run multi-agent repository architecture analysis.")
@@ -70,9 +42,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-auto-models", action="store_true", help="Disable free-model discovery.")
     parser.add_argument("--sequential", action="store_true", help="Disable parallel specialist execution.")
     parser.add_argument(
-        "--memory-file",
-        default=str(DEFAULT_MEMORY_PATH),
-        help="Path for CLI memory file.",
+        "--memory-db",
+        default=str(MEMORY_DB_PATH),
+        help="Path to the SQLite memory database (default: project-root/.archguard_memory.db).",
     )
     parser.add_argument(
         "--output-prefix",
@@ -104,8 +76,9 @@ def main() -> int:
     available_openrouter_models = fetch_available_openrouter_models() if auto_pick_models else set()
     available_groq_models = fetch_available_groq_models() if auto_pick_models else set()
 
-    memory_path = Path(args.memory_file)
-    memory_runs = load_memory(memory_path)
+    memory_db_path = Path(args.memory_db)
+    memory_store = SQLiteMemoryStore(memory_db_path)
+    memory_runs = memory_store.load(MAX_MEMORY_RUNS)
     memory_context = build_memory_context(memory_runs)
 
     specialist_results: Dict[str, str] = {}
@@ -189,15 +162,14 @@ def main() -> int:
 
     run_id = uuid4().hex[:8]
     generated_at_utc = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    memory_runs.append(
-        {
-            "run_id": run_id,
-            "repo_url": args.repo_url,
-            "generated_at_utc": generated_at_utc,
-            "report_excerpt": final_report[:MAX_MEMORY_REPORT_CHARS],
-        }
-    )
-    save_memory(memory_path, memory_runs)
+    new_entry = {
+        "run_id": run_id,
+        "repo_url": args.repo_url,
+        "generated_at_utc": generated_at_utc,
+        "report_excerpt": final_report[:MAX_MEMORY_REPORT_CHARS],
+    }
+    memory_store.append(new_entry)
+    memory_store.prune(keep=MAX_MEMORY_RUNS)
 
     markdown_path = Path(f"{args.output_prefix}.md")
     json_path = Path(f"{args.output_prefix}.json")
@@ -220,7 +192,7 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    print(f"Done. Markdown: {markdown_path} | JSON: {json_path} | Memory: {memory_path}")
+    print(f"Done. Markdown: {markdown_path} | JSON: {json_path} | Memory DB: {memory_db_path}")
     return 0
 
 if __name__ == "__main__":

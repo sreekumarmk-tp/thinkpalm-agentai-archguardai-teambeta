@@ -17,6 +17,13 @@ GROQ_MODELS_API = "https://api.groq.com/openai/v1/models"
 MAX_MEMORY_RUNS = 3
 MAX_MEMORY_REPORT_CHARS = 1200
 
+# Path for the SQLite cross-session memory database.
+# Defaults to a hidden file in the project root; override via env var.
+from pathlib import Path as _Path
+MEMORY_DB_PATH = _Path(
+    os.getenv("ARCHGUARD_MEMORY_DB", str(_Path(__file__).resolve().parents[2] / ".archguard_memory.db"))
+)
+
 MAX_ATTEMPTS_PER_MODEL = int(os.getenv("MAX_ATTEMPTS_PER_MODEL", 1))
 BASE_BACKOFF_SECONDS = int(os.getenv("BASE_BACKOFF_SECONDS", 3))
 RUN_SPECIALISTS_IN_PARALLEL = os.getenv("RUN_SPECIALISTS_IN_PARALLEL", "false").lower() == "true"

@@ -40,6 +40,14 @@ Single-agent architecture reviews were too broad, less explainable, and sensitiv
 1. **Editability**: Users prefer Word for further customizing results in internal reports.
 2. **Reliability**: Word handles the embedding of external images (like Mermaid diagrams) and tables much more natively and robustly than default FPDF-based PDF generation.
 
+### 2.12 Cross-Session Memory Persistence (April 2026)
+**Decision:** Implement a two-layer memory strategy using **SQLite** for persistence and **Streamlit `session_state`** for in-session caching.
+
+**Rationale:** 
+1. **Context Continuum**: Agentic systems perform better when grounded in previous findings. Flat JSON files (CLI) and session-state (UI) were too ephemeral.
+2. **Universal Accessibility**: Both the CLI and the Streamlit UI now share the same SQLite database (`.archguard_memory.db`), ensuring history carries over between different entry points.
+3. **Simplicity**: SQLite is part of the Python standard library, requiring no additional infrastructure (compared to a vector database) while providing structured, relational history.
+
 ### 2.4 Parallel Specialist Execution
 **Decision:** Empower users to toggle between parallel and sequential execution of specialists.
 
@@ -54,11 +62,13 @@ Single-agent architecture reviews were too broad, less explainable, and sensitiv
 flowchart TD
     A[Input: GitHub URL] --> B[GitHub tools: list/read]
     B --> C[LLM Factory: Model Discovery]
-    C --> D[Specialist Swarm: Arch/Security/Perf]
+    C --> Memory[(SQLite Memory Store)]
+    Memory <--> D[Specialist Swarm: Arch/Security/Perf]
     D --> E[Report Synthesizer]
     E --> F[Mermaid Cleanup]
     F --> G[Mermaid.ink Visuals]
     G --> H[Final Enriched Report]
+    H --> Memory
     H --> I[Word / JSON Export]
 ```
 

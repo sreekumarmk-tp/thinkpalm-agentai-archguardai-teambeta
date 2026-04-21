@@ -56,6 +56,7 @@
 | **User interface** | [Streamlit](https://streamlit.io/) |
 | **Orchestration** | [LangGraph](https://github.com/langchain-ai/langgraph) and [LangChain](https://www.langchain.com/) |
 | **Model gateway** | [OpenRouter](https://openrouter.ai/) and [Groq](https://groq.com/) |
+| **Persistence** | [SQLite](https://www.sqlite.org/) (Cross-session memory) |
 | **Version control** | [GitHub REST API v3](https://docs.github.com/en/rest) |
 | **Visualization** | [Mermaid.ink](https://mermaid.ink/) |
 | **Testing** | [Pytest](https://pytest.org/) |
@@ -149,10 +150,11 @@ Specialists use a **ReAct-style** loop (list repository files, read selected pat
 - **Council of specialists:** three domain agents (Architecture/Design, Security/Quality, Performance/Testing) plus synthesis.
 - **Evidence-based findings:** findings tied to files fetched via GitHub tools.
 - **LLM adapter layer:** OpenRouter and Groq with dynamic model discovery and fallbacks.
+- **Cross-session memory:** SQLite-backed persistence ensuring specialists remember previous runs across UI refreshes and CLI sessions.
 - **Parallel execution swarm:** optional parallel specialist runs (Streamlit sidebar / CLI flags).
 - **Visual reporting:** Mermaid in reports, cleaned and rendered via **Mermaid.ink** in Streamlit.
 - **Runtime resilience:** retries, backoff, and model fallback chains.
-- **CLI and UI:** Streamlit dashboard and CLI for automation.
+- **CLI and UI:** Streamlit dashboard and CLI with unified memory state.
 
 ---
 
@@ -179,14 +181,21 @@ graph TD
         I[Performance & QA]
     end
 
+    subgraph Storage_Layer
+        M1[(SQLite Memory Store)]
+    end
+
     A & B --> D
     D --> E
+    E <--> M1
     E --> G & H & I
-    G & H & I --> M[Report Synthesizer]
-    M --> N[Enriched Markdown + Diagrams]
+    G & H & I --> JS[Report Synthesizer]
+    JS --> N[Enriched Markdown + Diagrams]
+    N --> M1
 
     style Orchestration_Layer fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
     style Agent_Council fill:#f0f4c3,stroke:#827717,stroke-width:2px
+    style Storage_Layer fill:#e1f5fe,stroke:#01579b,stroke-width:2px
 ```
 
 ---
@@ -237,7 +246,8 @@ The synthesizer builds the final narrative and Mermaid blocks; the UI sanitizes 
 │   ├── config/
 │   │   └── settings.py         # Centralised settings & constants
 │   ├── memory/
-│   │   └── manager.py          # Session-state memory persistence
+│   │   ├── store.py            # SQLite database connector
+│   │   └── manager.py          # Two-layer cross-session persistence
 │   ├── tools/
 │   │   └── github.py           # GitHub REST API connectors
 │   ├── ui/
