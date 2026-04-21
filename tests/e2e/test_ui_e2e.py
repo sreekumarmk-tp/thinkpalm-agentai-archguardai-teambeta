@@ -48,6 +48,30 @@ class TestInputValidation:
         btn.click().run()
         assert any("valid GitHub" in w.value for w in at.warning)
 
+def mock_app():
+    import streamlit as st
+    
+    st.session_state.current_analysis = {
+        "run_id": "test-uuid",
+        "repo_url": "http://github.com/test/repo",
+        "generated_at": "2026-01-01",
+        "final_report": "# Test Report",
+        "specialist_results": {"Agent": "Result"},
+        "selected_models": {"Agent": "model"},
+        "synthesizer_model": "synth-model",
+        "provider": "Groq",
+        "active_preset": "Reliable",
+        "max_attempts_per_model": 1,
+        "base_backoff_seconds": 1,
+    }
+    # Simulate the part of app.py that renders the report
+    st.header("📋 Analysis Report")
+    tab1, tab2, tab3 = st.tabs(["🚀 Executive Summary", "🔍 Specialist Intel", "📦 Export & Data"])
+    with tab1:
+        st.markdown("# Test Report")
+    with tab3:
+        st.button("Download JSON")
+
 class TestAnalysisMockFlow:
     """
     Since we can't easily mock the full LLM chain within AppTest.from_file 
@@ -56,31 +80,6 @@ class TestAnalysisMockFlow:
     manually setting session state if possible.
     """
     def test_post_analysis_ui_rendering(self):
-        def mock_app():
-            import streamlit as st
-            from src.ui.components import render_export_downloads
-            
-            st.session_state.current_analysis = {
-                "run_id": "test-uuid",
-                "repo_url": "http://github.com/test/repo",
-                "generated_at": "2026-01-01",
-                "final_report": "# Test Report",
-                "specialist_results": {"Agent": "Result"},
-                "selected_models": {"Agent": "model"},
-                "synthesizer_model": "synth-model",
-                "provider": "Groq",
-                "active_preset": "Reliable",
-                "max_attempts_per_model": 1,
-                "base_backoff_seconds": 1,
-            }
-            # Simulate the part of app.py that renders the report
-            st.header("📋 Analysis Report")
-            tab1, tab2, tab3 = st.tabs(["🚀 Executive Summary", "🔍 Specialist Intel", "📦 Export & Data"])
-            with tab1:
-                st.markdown("# Test Report")
-            with tab3:
-                st.button("Download JSON")
-        
         at = AppTest.from_function(mock_app)
         at.run()
         assert _no_exception(at)
@@ -89,3 +88,4 @@ class TestAnalysisMockFlow:
         # Use tab label as check
         labels = [t.label for t in at.tabs]
         assert "🚀 Executive Summary" in labels
+
