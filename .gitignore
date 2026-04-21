@@ -213,3 +213,17 @@ __marimo__/
 # ArchGuard AI — cross-session SQLite memory database (local, per-developer)
 .archguard_memory.db
 *.archguard_memory.db
+
+# ArchGuard CLI / generated report outputs (markdown, JSON, Word — may contain sensitive/API-derived content)
+multi_agent_report.json
+multi_agent_report.md
+multi_agent_report.docx
+.multi_agent_report.json
+.multi_agent_report.md
+.multi_agent_report.docx
+# Streamlit download naming if saved into the repo by mistake
+arch_review_*.docx
+.DS_Store
+
+# ArchGuard CLI default output directory (markdown, JSON, Word)
+outputs/

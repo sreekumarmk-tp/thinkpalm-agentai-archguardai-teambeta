@@ -6,7 +6,7 @@
 
 ## Project name and problem statement
 
-**Project name:** **ArchGuard AI** (Agentic Architecture Assistant).
+**Project name:** **ArchGuard AI** (Agentic Architecture Assistant). 
 
 **Problem statement:** Teams spend too much time understanding unfamiliar repositories and judging architectural risk. Single-shot LLM prompts cannot reliably cover a whole codebase, and shallow linting misses cross-cutting concerns (security posture, performance, structural maintainability). Context limits and weak grounding to real files make one-off reviews inconsistent. ArchGuard AI addresses this by orchestrating specialist agents that **list and read real files** from GitHub, score domains, and synthesize an evidence-based engineering report with diagrams and export options.
 
@@ -32,6 +32,7 @@
 | Package | Example resolved version¹ |
 | :--- | :--- |
 | streamlit | 1.56.0 |
+| langchain | 1.2.15 |
 | langchain-openai | 1.1.14 |
 | langchain-groq | 1.1.2 |
 | langgraph | 1.1.8 |
@@ -56,7 +57,6 @@
 | **User interface** | [Streamlit](https://streamlit.io/) |
 | **Orchestration** | [LangGraph](https://github.com/langchain-ai/langgraph) and [LangChain](https://www.langchain.com/) |
 | **Model gateway** | [OpenRouter](https://openrouter.ai/) and [Groq](https://groq.com/) |
-| **Persistence** | [SQLite](https://www.sqlite.org/) (Cross-session memory) |
 | **Version control** | [GitHub REST API v3](https://docs.github.com/en/rest) |
 | **Visualization** | [Mermaid.ink](https://mermaid.ink/) |
 | **Testing** | [Pytest](https://pytest.org/) |
@@ -110,7 +110,102 @@
    ```bash
    python src/cli.py --repo-url "https://github.com/owner/repo"
    ```
-   Use `python src/cli.py --help` for workers, retries, sequential mode, and output paths.
+   Defaults mirror **`src/app.py`** and the Streamlit sidebar (see **`src/config/settings.py`** and `.env`). Full flag list: `python src/cli.py --help`.
+
+### CLI reference (`src/cli.py`)
+
+**Outputs (default)** — With default **`--output-prefix`**, the CLI writes three files under **`outputs/`** (the directory is created if needed):
+
+| File | Description |
+| :--- | :--- |
+| `outputs/multi_agent_report.md` | Final synthesized markdown report. |
+| `outputs/multi_agent_report.json` | Structured run payload (repository, `run_metadata`, `run_configuration`, models, specialist outputs, full markdown). |
+| `outputs/multi_agent_report.docx` | Word document from **`export_to_docx`** — same pipeline as the Streamlit **Download Word** button. If Word generation fails, a warning is printed to **stderr**; markdown and JSON are still saved. |
+
+**Flags**
+
+| Flag | Description |
+| :--- | :--- |
+| `--repo-url` | **Required.** GitHub repository URL to analyze. |
+| `--provider` `groq` \| `openrouter` | Primary LLM provider for model discovery (default: **`DEFAULT_LLM_PROVIDER`** in `.env`). |
+| `--parallel` | Force parallel specialist execution (overrides **`RUN_SPECIALISTS_IN_PARALLEL`**). |
+| `--sequential` | Force sequential execution. Mutually exclusive with `--parallel`; if neither is set, the env default applies. |
+| `--workers` | Max parallel workers when parallel (default **3**, same as the app sidebar; range **1–10**). |
+| `--max-attempts-per-model` | Retries per model before fallback (default **`MAX_ATTEMPTS_PER_MODEL`**; range **1–5**). |
+| `--backoff` | Base backoff seconds between retries (default **`BASE_BACKOFF_SECONDS`**; range **1–60**). |
+| `--preset` | Label stored in JSON `run_configuration.preset` (default **`Reliable`**, matches the app). |
+| `--no-auto-models` | Disable live model discovery; use **`--manual-model`** or a provider-specific default (`groq/…` / `openrouter/…`). |
+| `--manual-model` | Single model id with `groq/` or `openrouter/` prefix (used with **`--no-auto-models`**). |
+| `--memory-db` | Path to the SQLite memory database (default **`MEMORY_DB_PATH`**: **`ARCHGUARD_MEMORY_DB`** env or **`.archguard_memory.db`** at the repo root — shared with Streamlit when the path matches). |
+| `--output-prefix` | Path prefix without extension (default **`outputs/multi_agent_report`**). Example: `outputs/sprint2` or `reports/acme`. |
+
+**Examples**
+
+```bash
+python src/cli.py --repo-url "https://github.com/owner/repo" --provider openrouter --sequential
+python src/cli.py --repo-url "https://github.com/owner/repo" --parallel --workers 3
+python src/cli.py --repo-url "https://github.com/owner/repo" --output-prefix "outputs/nightly"
+```
+
+### Changing models from the CLI
+
+1. **Switch provider (auto discovery still on)**  
+   Use **`--provider groq`** or **`--provider openrouter`** so candidate lists and fallbacks come from that provider. If you omit **`--provider`**, the CLI uses **`DEFAULT_LLM_PROVIDER`** from `.env`.  
+   The **order** of models in auto mode still comes from **`.env`** (for example `GROQ_FREE_MODELS`, `GROQ_ARCHITECT_DESIGN`, `OPENROUTER_REPORT_SYNTHESIZER`, etc. — see **`.env.example`**).
+
+   ```bash
+   python src/cli.py --repo-url "https://github.com/owner/repo" --provider groq
+   python src/cli.py --repo-url "https://github.com/owner/repo" --provider openrouter
+   ```
+
+2. **Pin one model for the entire run (no discovery)**  
+   Pass **`--no-auto-models`** and **`--manual-model`** with a full id including the prefix expected by **`get_llm`**: **`groq/...`** or **`openrouter/...`**. Specialists and the synthesizer all use that single model (with retries / fallback only if the same id is retried per your **`--max-attempts-per-model`** settings).
+
+   ```bash
+   python src/cli.py --repo-url "https://github.com/owner/repo" \
+     --no-auto-models \
+     --manual-model "groq/llama-3.3-70b-versatile"
+
+   python src/cli.py --repo-url "https://github.com/owner/repo" \
+     --no-auto-models \
+     --manual-model "openrouter/openai/gpt-oss-120b:free"
+   ```
+
+   If you use **`--no-auto-models`** without **`--manual-model`**, the CLI uses a **built-in default** for the active provider (`groq/llama-3.3-70b-versatile` vs `openrouter/openai/gpt-oss-120b:free`), based on **`--provider`** or **`DEFAULT_LLM_PROVIDER`**.
+
+3. **Tune models without CLI flags (auto mode)**  
+   Edit **`.env`** to change preference lists and fallbacks (e.g. `GROQ_FREE_MODELS`, per-agent `GROQ_*` / `OPENROUTER_*` variables). Those apply when you **do not** pass **`--no-auto-models`**.
+
+### Retries and backoff (CLI vs `src/app.py`)
+
+In **Streamlit**, **Max Attempts per Model** and **Base Backoff (seconds)** come from the sidebar; their **initial values** are read from **`MAX_ATTEMPTS_PER_MODEL`** and **`BASE_BACKOFF_SECONDS`** in **`src/config/settings.py`** (overridable via **`.env`**).
+
+The **CLI** uses the same pipeline: **`--max-attempts-per-model`** and **`--backoff`** are passed into **`SpecialistFactory.run_agent_with_retries`** and **`synthesize_report`**, just like **`app.py`** uses `config["max_attempts_per_model"]` and `config["base_backoff_seconds"]`. Allowed ranges match the UI (**1–5** attempts, **1–60** seconds backoff).
+
+**Option A — Match the app’s default env (no CLI flags)**  
+Set in **`.env`** (same variables the sidebar starts from):
+
+```bash
+MAX_ATTEMPTS_PER_MODEL=1
+BASE_BACKOFF_SECONDS=3
+```
+
+Then run:
+
+```bash
+python src/cli.py --repo-url "https://github.com/owner/repo"
+```
+
+**Option B — Match specific sidebar numbers (explicit flags)**  
+Example: 3 attempts per model, 5 seconds base backoff:
+
+```bash
+python src/cli.py --repo-url "https://github.com/owner/repo" \
+  --max-attempts-per-model 3 \
+  --backoff 5
+```
+
+If you omit **`--max-attempts-per-model`** or **`--backoff`**, the CLI uses **`MAX_ATTEMPTS_PER_MODEL`** and **`BASE_BACKOFF_SECONDS`** from settings — equivalent to opening the app with the sidebar at its default positions.
 
 9. **Optional: run tests**  
    ```bash
@@ -151,11 +246,10 @@ Specialists use a **ReAct-style** loop (list repository files, read selected pat
 - **Council of specialists:** three domain agents (Architecture/Design, Security/Quality, Performance/Testing) plus synthesis.
 - **Evidence-based findings:** findings tied to files fetched via GitHub tools.
 - **LLM adapter layer:** OpenRouter and Groq with dynamic model discovery and fallbacks.
-- **Cross-session memory:** SQLite-backed persistence ensuring specialists remember previous runs across UI refreshes and CLI sessions.
 - **Parallel execution swarm:** optional parallel specialist runs (Streamlit sidebar / CLI flags).
 - **Visual reporting:** Mermaid in reports, cleaned and rendered via **Mermaid.ink** in Streamlit.
 - **Runtime resilience:** retries, backoff, and model fallback chains.
-- **CLI and UI:** Streamlit dashboard and CLI with unified memory state.
+- **CLI and UI:** Streamlit dashboard and **`src/cli.py`** for headless runs (markdown, JSON, and Word under **`outputs/`** by default).
 
 ---
 
@@ -182,21 +276,14 @@ graph TD
         I[Performance & QA]
     end
 
-    subgraph Storage_Layer
-        M1[(SQLite Memory Store)]
-    end
-
     A & B --> D
     D --> E
-    E <--> M1
     E --> G & H & I
-    G & H & I --> JS[Report Synthesizer]
-    JS --> N[Enriched Markdown + Diagrams]
-    N --> M1
+    G & H & I --> M[Report Synthesizer]
+    M --> N[Enriched Markdown + Diagrams]
 
     style Orchestration_Layer fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
     style Agent_Council fill:#f0f4c3,stroke:#827717,stroke-width:2px
-    style Storage_Layer fill:#e1f5fe,stroke:#01579b,stroke-width:2px
 ```
 
 ---
@@ -247,8 +334,7 @@ The synthesizer builds the final narrative and Mermaid blocks; the UI sanitizes 
 │   ├── config/
 │   │   └── settings.py         # Centralised settings & constants
 │   ├── memory/
-│   │   ├── store.py            # SQLite database connector
-│   │   └── manager.py          # Two-layer cross-session persistence
+│   │   └── manager.py          # Session-state memory persistence
 │   ├── tools/
 │   │   └── github.py           # GitHub REST API connectors
 │   ├── ui/
@@ -260,6 +346,7 @@ The synthesizer builds the final narrative and Mermaid blocks; the UI sanitizes 
 │   │   ├── rendering.py        # Enriched report display
 │   │   └── mermaid_cleanup.py  # Mermaid syntax sanitization
 │   └── app.py                  # Streamlit Application
+├── outputs/                    # CLI-generated .md / .json / .docx (gitignored)
 ├── screenshots/                # Prototype screenshots (see above)
 ├── tests/                      # Unit, CLI E2E, Streamlit UI E2E
 ├── ADR.md                      # Architecture Decision Records
@@ -272,7 +359,7 @@ The synthesizer builds the final narrative and Mermaid blocks; the UI sanitizes 
 - **`src/utils/llm_factory.py`:** Groq / OpenRouter routing.  
 - **`src/utils/mermaid_cleanup.py`:** diagram sanitization.  
 - **`src/app.py`:** Streamlit entrypoint.  
-- **`src/cli.py`:** headless CLI for CI-style runs.
+- **`src/cli.py`:** headless pipeline aligned with the app — SQLite memory, provider / parallel / retry flags, JSON metadata, and **`export_to_docx`** Word export to **`outputs/`** (configurable via `--output-prefix`).
 
 ---
 

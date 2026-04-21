@@ -16,7 +16,16 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 
-from src.config.settings import ACTIVE_AGENT_IDS, MAX_MEMORY_RUNS, MAX_MEMORY_REPORT_CHARS, MEMORY_DB_PATH
+from src.config.settings import (
+    ACTIVE_AGENT_IDS,
+    MAX_MEMORY_RUNS,
+    MAX_MEMORY_REPORT_CHARS,
+    MEMORY_DB_PATH,
+    DEFAULT_LLM_PROVIDER,
+    MAX_ATTEMPTS_PER_MODEL,
+    BASE_BACKOFF_SECONDS,
+    RUN_SPECIALISTS_IN_PARALLEL,
+)
 from src.memory.store import SQLiteMemoryStore
 from src.memory.manager import build_memory_context
 from src.agents.specialists.factory import SpecialistFactory
@@ -27,36 +36,106 @@ from src.utils.models import (
     get_model_candidates_for_agent,
 )
 from src.agents.synthesizer import synthesize_report
+from src.utils.export import export_to_docx
 
 load_dotenv()
 
-DEFAULT_MANUAL_MODEL = "openai/gpt-oss-120b:free"
+
+def _default_manual_model(provider: str) -> str:
+    """Fallback single model when --no-auto-models and --manual-model omitted."""
+    if provider == "groq":
+        return "groq/llama-3.3-70b-versatile"
+    return "openrouter/openai/gpt-oss-120b:free"
+
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run multi-agent repository architecture analysis.")
-    parser.add_argument("--repo-url", required=True, help="Target GitHub repository URL.")
-    parser.add_argument("--manual-model", default=DEFAULT_MANUAL_MODEL, help="Fallback model.")
-    parser.add_argument("--workers", type=int, default=4, help="Parallel workers (1-10).")
-    parser.add_argument("--retries", type=int, default=2, help="Attempts per model.")
-    parser.add_argument("--backoff", type=int, default=2, help="Base backoff seconds.")
-    parser.add_argument("--no-auto-models", action="store_true", help="Disable free-model discovery.")
-    parser.add_argument("--sequential", action="store_true", help="Disable parallel specialist execution.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run multi-agent repository architecture analysis. "
+            "Defaults align with src/app.py + sidebar (see settings / .env)."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--repo-url",
+        required=True,
+        help="Target GitHub repository URL.",
+    )
+    exe = parser.add_mutually_exclusive_group()
+    exe.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Force parallel specialist runs (overrides RUN_SPECIALISTS_IN_PARALLEL when set).",
+    )
+    exe.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Force sequential specialist runs.",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=("groq", "openrouter"),
+        default=None,
+        help="Primary LLM provider for model discovery (default: DEFAULT_LLM_PROVIDER from .env / settings).",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Max parallel workers when running in parallel (default: 3, same as Streamlit sidebar).",
+    )
+    parser.add_argument(
+        "--max-attempts-per-model",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Retries per model before fallback (default: MAX_ATTEMPTS_PER_MODEL from settings).",
+    )
+    parser.add_argument(
+        "--backoff",
+        type=int,
+        default=None,
+        metavar="SEC",
+        help="Base backoff seconds between retries (default: BASE_BACKOFF_SECONDS from settings).",
+    )
+    parser.add_argument(
+        "--preset",
+        default="Reliable",
+        help='Preset label stored in JSON export (matches app sidebar; default: "Reliable").',
+    )
+    parser.add_argument(
+        "--manual-model",
+        default=None,
+        metavar="MODEL",
+        help="Single model id with groq/ or openrouter/ prefix when using --no-auto-models.",
+    )
+    parser.add_argument(
+        "--no-auto-models",
+        action="store_true",
+        help="Disable provider model discovery; uses --manual-model (or a provider default).",
+    )
     parser.add_argument(
         "--memory-db",
         default=str(MEMORY_DB_PATH),
-        help="Path to the SQLite memory database (default: project-root/.archguard_memory.db).",
+        help="Path to the SQLite memory database (shared with Streamlit when default).",
     )
     parser.add_argument(
         "--output-prefix",
-        default="multi_agent_report",
-        help="Output filename prefix (without extension).",
+        default="outputs/multi_agent_report",
+        help=(
+            "Output path prefix without extension (.md / .json / .docx appended). "
+            "Default writes under the outputs/ directory (created if missing)."
+        ),
     )
     return parser.parse_args()
+
 
 def main() -> int:
     args = parse_args()
 
     from src.config.settings import GROQ_API_KEY
+
     if not os.getenv("OPENROUTER_API_KEY") and not GROQ_API_KEY:
         print("Error: OPENROUTER_API_KEY or GROQ_API_KEY is missing. Set it in .env or environment variables.")
         return 1
@@ -67,10 +146,30 @@ def main() -> int:
         print(f"Error: {exc}")
         return 1
 
+    provider = (args.provider or DEFAULT_LLM_PROVIDER or "groq").lower()
+    if provider not in ("groq", "openrouter"):
+        provider = "groq"
+
+    if args.parallel:
+        run_in_parallel = True
+    elif args.sequential:
+        run_in_parallel = False
+    else:
+        run_in_parallel = RUN_SPECIALISTS_IN_PARALLEL
+
+    max_workers = args.workers if args.workers is not None else 3
+    max_workers = max(1, min(10, max_workers))
+
+    retries = args.max_attempts_per_model if args.max_attempts_per_model is not None else MAX_ATTEMPTS_PER_MODEL
+    retries = max(1, min(5, retries))
+
+    backoff = args.backoff if args.backoff is not None else BASE_BACKOFF_SECONDS
+    backoff = max(1, min(60, int(backoff)))
+
     auto_pick_models = not args.no_auto_models
-    run_in_parallel = not args.sequential
-    max_workers = max(1, min(10, args.workers))
-    retries = max(1, args.retries)
+    manual_model = args.manual_model
+    if not auto_pick_models and not manual_model:
+        manual_model = _default_manual_model(provider)
 
     print("Discovering available models...")
     available_openrouter_models = fetch_available_openrouter_models() if auto_pick_models else set()
@@ -88,13 +187,13 @@ def main() -> int:
     for spec in AGENT_DEFINITIONS:
         candidates = (
             get_model_candidates_for_agent(
-                spec["id"], 
-                available_openrouter_models, 
-                provider="groq" if "groq" in args.manual_model.lower() else "openrouter",
-                available_groq_models=available_groq_models
+                spec["id"],
+                available_openrouter_models,
+                provider=provider,
+                available_groq_models=available_groq_models,
             )
             if auto_pick_models
-            else [args.manual_model]
+            else [manual_model]
         )
         selected_models[spec["title"]] = candidates[0]
         model_plan.append((spec, candidates))
@@ -109,7 +208,7 @@ def main() -> int:
                     spec["id"],
                     candidates,
                     retries,
-                    args.backoff,
+                    backoff,
                     memory_context,
                 ): (spec, candidates)
                 for spec, candidates in model_plan
@@ -133,7 +232,7 @@ def main() -> int:
                 spec["id"],
                 candidates,
                 retries,
-                args.backoff,
+                backoff,
                 memory_context,
             )
             specialist_results[spec["title"]] = content
@@ -141,27 +240,27 @@ def main() -> int:
 
     synthesizer_candidates = (
         get_model_candidates_for_agent(
-            "report_synthesizer", 
-            available_openrouter_models, 
-            provider="groq" if "groq" in args.manual_model.lower() else "openrouter",
-            available_groq_models=available_groq_models
+            "report_synthesizer",
+            available_openrouter_models,
+            provider=provider,
+            available_groq_models=available_groq_models,
         )
         if auto_pick_models
-        else [args.manual_model]
+        else [manual_model]
     )
     synthesizer_model = synthesizer_candidates[0]
     print(f"Synthesizing final report with {synthesizer_model}...")
     final_report = synthesize_report(
-        args.repo_url, 
-        synthesizer_candidates, 
-        specialist_results, 
+        args.repo_url,
+        synthesizer_candidates,
+        specialist_results,
         memory_context,
         max_attempts_per_model=retries,
-        base_backoff_seconds=args.backoff
+        base_backoff_seconds=backoff,
     )
 
     run_id = uuid4().hex[:8]
-    generated_at_utc = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    generated_at_utc = datetime.now(timezone.utc).isoformat()
     new_entry = {
         "run_id": run_id,
         "repo_url": args.repo_url,
@@ -173,13 +272,27 @@ def main() -> int:
 
     markdown_path = Path(f"{args.output_prefix}.md")
     json_path = Path(f"{args.output_prefix}.json")
+    docx_path = Path(f"{args.output_prefix}.docx")
+    markdown_path.parent.mkdir(parents=True, exist_ok=True)
     markdown_path.write_text(final_report, encoding="utf-8")
+    preset = (args.preset or "Reliable").strip() or "Reliable"
     json_path.write_text(
         json.dumps(
             {
                 "repository": args.repo_url,
-                "run_id": run_id,
-                "generated_at_utc": generated_at_utc,
+                "run_metadata": {
+                    "run_id": run_id,
+                    "generated_at_utc": generated_at_utc,
+                },
+                "run_configuration": {
+                    "preset": preset.lower(),
+                    "retry_attempts_per_model": retries,
+                    "base_backoff_seconds": backoff,
+                    "llm_provider": provider,
+                    "auto_pick_models": auto_pick_models,
+                    "parallel_enabled": run_in_parallel,
+                    "parallel_workers": max_workers if run_in_parallel else 1,
+                },
                 "models": {
                     "specialists": selected_models,
                     "report_synthesizer": synthesizer_model,
@@ -192,8 +305,21 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    print(f"Done. Markdown: {markdown_path} | JSON: {json_path} | Memory DB: {memory_db_path}")
+    try:
+        docx_path.write_bytes(export_to_docx(final_report, run_id))
+    except Exception as exc:
+        print(f"Warning: Word export failed ({exc}). Markdown and JSON were written successfully.", file=sys.stderr)
+
+    parts = [
+        f"Markdown: {markdown_path}",
+        f"JSON: {json_path}",
+    ]
+    if docx_path.exists():
+        parts.append(f"Word: {docx_path}")
+    parts.append(f"Memory DB: {memory_db_path}")
+    print("Done. " + " | ".join(parts))
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
