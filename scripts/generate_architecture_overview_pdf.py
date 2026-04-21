@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Build docs/ArchGuard-Architecture-Overview.pdf — narrative architecture overview
-in the same style as docs/Architecture Overview.pdf, aligned with README.md.
+Build docs/Architecture-Overview.pdf — narrative architecture overview
+aligned with README.md (run: python scripts/generate_architecture_overview_pdf.py).
 """
 from __future__ import annotations
 
@@ -100,9 +100,11 @@ def build_pdf(out_path: Path) -> None:
             "Council of Specialists: three converged domain agents plus a dedicated report synthesizer.",
             "Evidence-backed outputs: GitHub REST tools fetch real file trees and contents, not guessed snippets.",
             "Parallel execution swarm: Streamlit and CLI can run specialists concurrently or sequentially for stability.",
+            "Cross-session memory: SQLite store (.archguard_memory.db by default) shared between UI and CLI; Streamlit session cache for in-session speed.",
+            "CLI outputs: default prefix writes markdown, JSON, and Word under outputs/ using the same export_to_docx path as the Streamlit download.",
             "Visual reporting: synthesizer-produced Mermaid is sanitized and rendered via Mermaid.ink in the Streamlit UI.",
             "Professional src/ layout: application code, configuration, tools, memory, UI, and tests are separated per modern Python practice.",
-            "LangGraph is included for reporter state-graph compilation; the live dashboard pipeline is driven by the factory and synthesizer modules described in the project README.",
+            "LangChain agents with tools; LangGraph included for reporter state-graph compilation; live flows driven by factory and synthesizer per README.",
         ]
     )
 
@@ -110,15 +112,15 @@ def build_pdf(out_path: Path) -> None:
         "Technology stack (aligned with README): User Interface - Streamlit; "
         "Orchestration - LangGraph and LangChain; Model Gateway - OpenRouter and Groq; "
         "Version Control - GitHub REST API v3; Logic and Runtime - Python 3.10 or newer; "
-        "Visualization - Mermaid.ink; Testing - Pytest. Optional exports include Word "
-        "documents and JSON for downstream reporting."
+        "Visualization - Mermaid.ink; Testing - Pytest with pytest-cov for coverage, pytest.ini pythonpath, and tests/conftest.py for import path resilience."
     )
 
     pdf.heading("3. Data Flow and Execution", 12)
     pdf.body(
         "1. Ingestion: The operator supplies a GitHub repository URL through the "
-        "Streamlit dashboard or the headless CLI, optionally with parallel worker and "
-        "retry settings from the sidebar or flags."
+        "Streamlit dashboard or the headless CLI, with optional parallel or sequential "
+        "execution, worker counts, retry and backoff settings, model presets or manual "
+        "models, and CLI --memory-db so SQLite matches the UI when desired."
     )
     pdf.body(
         "2. Model planning: The application queries provider model APIs, ranks free "
@@ -136,21 +138,23 @@ def build_pdf(out_path: Path) -> None:
         "roadmaps, comparative tables, and required Mermaid architecture and flow diagrams."
     )
     pdf.body(
-        "5. Presentation and export: Streamlit renders markdown and diagram images; "
-        "users may download Word documents or JSON bundles for reporting pipelines."
+        "5. Presentation and export: Streamlit renders markdown and diagram images and "
+        "offers Word and JSON downloads. The CLI writes the synthesized report to "
+        "outputs/ as .md, .json, and .docx by default (prefix configurable), using the same "
+        "Word export pipeline as the UI."
     )
 
     pdf.heading("4. Quality Assurance and Validation", 12)
     pdf.body(
-        "ArchGuard AI ships a multi-layer Pytest suite (on the order of fifty-plus tests "
-        "as documented in the README) spanning unit modules for specialists, "
-        "synthesizer behavior, LLM factory routing, model discovery, GitHub tooling, "
-        "memory management, rendering, schemas, export, and UI helpers. End-to-end "
-        "coverage includes CLI flows that exercise memory persistence and file outputs, "
-        "and Streamlit AppTest scenarios that load the application, drive sidebar "
-        "configuration, and validate widget behavior without a full browser. This "
-        "structure guards the contract between orchestration code, tools, and LLM "
-        "integration against regressions as providers and dependencies evolve."
+        "ArchGuard AI ships a multi-layer Pytest suite with on the order of sixty-six tests "
+        "spanning unit modules for specialists, synthesizer behavior, LLM factory routing, "
+        "model discovery, GitHub tooling, SQLite memory store and manager, rendering, "
+        "schemas, export, and UI helpers. End-to-end coverage includes CLI flows that "
+        "exercise SQLite memory persistence and outputs under outputs/, and Streamlit "
+        "AppTest scenarios that load the application, drive sidebar configuration, and "
+        "validate widget behavior without a full browser. pytest-cov supports coverage "
+        "reports; pytest.ini sets pythonpath for reliable imports. This structure guards "
+        "the contract between orchestration code, tools, and LLM integration against regressions."
     )
 
     pdf.heading("5. Conclusion and Scalability", 12)
@@ -170,7 +174,7 @@ def build_pdf(out_path: Path) -> None:
 
 
 def main() -> None:
-    default_out = ROOT / "docs" / "ArchGuard-Architecture-Overview.pdf"
+    default_out = ROOT / "docs" / "Architecture-Overview.pdf"
     out = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else default_out
     build_pdf(out)
     print(f"Wrote {out}")
