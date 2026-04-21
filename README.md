@@ -217,7 +217,9 @@ If you omit **`--max-attempts-per-model`** or **`--backoff`**, the CLI uses **`M
 
 ## Working prototype (screenshots)
 
-Screenshots below are stored under [`screenshots/`](screenshots/).
+Screenshots live under [`screenshots/`](screenshots/). Filenames with spaces use URL-encoded links (e.g. `%20`).
+
+### Streamlit UI (workflow)
 
 | Step | Screenshot |
 | :---: | :---: |
@@ -226,11 +228,19 @@ Screenshots below are stored under [`screenshots/`](screenshots/).
 | Specialist agent 2 (in progress) | ![Agent 2](screenshots/03_Agent%202.png) |
 | Specialist agent 3 (in progress) | ![Agent 3](screenshots/04_Agent%203.png) |
 | Analysis completed | ![Completed](screenshots/05_Completed.png) |
-| Full-page report (Groq example) | ![Full page result](screenshots/06_groq_full_page_result.png) |
+| Full-page report (Groq example) | ![Groq full-page report](screenshots/06_groq_full_page_result.png) |
 | Specialist intelligence section | ![Specialist intelligence](screenshots/07_specialist_intelligence.png) |
 | Export data UI | ![Export data](screenshots/08_export_data.png) |
 | Document download | ![Document download](screenshots/09_document_download.png) |
-| Full-page report (OpenRouter example) | ![Full page result OR](screenshots/10_OpenRouter_full_page_result.png) |
+| Full-page report (OpenRouter example) | ![OpenRouter full-page report](screenshots/10_OpenRouter_full_page_result.png) |
+
+### CLI and testing
+
+| Step | Screenshot |
+| :---: | :---: |
+| CLI execution sample (`src/cli.py`, outputs, etc.) | ![CLI execution sample](screenshots/11_CLI_execution_sample.png) |
+| Running tests (`pytest`) | ![Running tests](screenshots/12_running_tests.png) |
+| Test / coverage reports | ![Test reports](screenshots/13_test_reports.jpeg) |
 
 ---
 
